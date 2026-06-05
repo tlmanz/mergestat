@@ -86,6 +86,10 @@ const SidebarView: React.FC = () => {
                 active={isSidebarActive('/settings/user-settings')}
                 onClick={() => push('/settings/user-settings')}
                 label='User Settings' level='sub' />
+              <Sidebar.Item compact={false}
+                active={isSidebarActive('/settings/oauth-roles')}
+                onClick={() => push('/settings/oauth-roles')}
+                label='OAuth Roles' level='sub' />
             </>
           } />
       </Sidebar.Main>

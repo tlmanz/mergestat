@@ -112,6 +112,14 @@ services:
       POSTGRES_CONNECTION: postgres://postgres:${POSTGRES_PASSWORD:-password}@postgres:5432/postgres?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:-secret} # should match - "--jwt-secret=secret" flag in graphql service
       INSECURE_SESSION_COOKIE: 1
+      # --- OAuth (SSO) login via NextAuth (optional) ---
+      # Leave GOOGLE_CLIENT_ID/SECRET unset to disable the "Sign in with Google" button.
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-secret} # encrypts the NextAuth session; set a strong random value in production
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3300} # public base URL of the UI; OAuth callbacks are derived from this
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      OAUTH_DEFAULT_ROLE: ${OAUTH_DEFAULT_ROLE:-READ_ONLY} # role for OAuth users with no override (ADMIN|USER|QUERIES_ONLY|READ_ONLY|DEMO)
+      OAUTH_ALLOWED_DOMAINS: ${OAUTH_ALLOWED_DOMAINS:-} # optional comma-separated email-domain allow-list, e.g. "mergestat.com"
     labels:
       shipyard.route: '/'
 

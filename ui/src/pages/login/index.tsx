@@ -2,9 +2,12 @@ import { Alert, Button, HelpText, Input, Label, Panel } from '@mergestat/blocks'
 import { Icon } from '@mergestat/icons'
 import Head from 'next/head'
 import { useRouter } from 'next/router'
-import { ChangeEvent, Fragment, useState } from 'react'
+import { getProviders, signIn } from 'next-auth/react'
+import { ChangeEvent, Fragment, useEffect, useState } from 'react'
 import { auth } from 'src/api-logic/axios/api'
 import { MERGESTAT_TITLE } from 'src/utils/constants'
+
+type OAuthProvider = { id: string, name: string }
 
 const LoginPage = () => {
   const title = `Login  ${MERGESTAT_TITLE}`
@@ -14,6 +17,18 @@ const LoginPage = () => {
   const [user, setUser] = useState<string>('')
   const [password, setPassword] = useState<string>('')
   const [error, setError] = useState<boolean>(false)
+  const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([])
+
+  // Discover which OAuth providers are configured on the server (a provider is
+  // only registered when its credentials are present), so we render only the
+  // buttons that will actually work.
+  useEffect(() => {
+    getProviders()
+      .then((providers) => {
+        setOauthProviders(providers ? Object.values(providers).map(({ id, name }) => ({ id, name })) : [])
+      })
+      .catch(() => setOauthProviders([]))
+  }, [])
 
   const handleLogin = async () => {
     setError(false)
@@ -42,11 +57,29 @@ const LoginPage = () => {
               </Alert>
             )}
 
+            {oauthProviders.length > 0 && (
+              <div className="mb-6 space-y-3">
+                {oauthProviders.map((provider) => (
+                  <Button
+                    key={provider.id}
+                    isBlock
+                    skin="secondary"
+                    label={`Sign in with ${provider.name}`}
+                    onClick={() => signIn(provider.id, { callbackUrl: '/explore' })}
+                  />
+                ))}
+                <div className="flex items-center gap-3 text-gray-400">
+                  <span className="h-px flex-1 bg-gray-200" />
+                  <span className="text-sm">or</span>
+                  <span className="h-px flex-1 bg-gray-200" />
+                </div>
+              </div>
+            )}
+
             <Alert type="info" className="mb-6">
               Login using your MergeStat <strong>database credentials</strong>.
             </Alert>
 
-            {/* <h2 className="t-h2">Log in</h2> */}
             <form className="space-y-4">
               <div>
                 <Label>Database user

@@ -1,6 +1,7 @@
 import { Avatar, BreadcrumbNav, Dropdown, Menu, Toolbar } from '@mergestat/blocks'
 import { BookIcon, CaretDownIcon, CogIcon, LogoutIcon, UserIcon } from '@mergestat/icons'
 import { useRouter } from 'next/router'
+import { signOut } from 'next-auth/react'
 import React from 'react'
 import { logout } from 'src/api-logic/axios/api'
 import { CurrentUserQuery } from 'src/api-logic/graphql/generated/schema'
@@ -11,8 +12,11 @@ const NavHeader: React.FC<CurrentUserQuery> = ({ currentMergeStatUser }: Current
   const [{ crumbs }] = useGlobalContext()
 
   const handleLogout = async () => {
-    const loggedout = await logout()
-    loggedout && router.push('/login')
+    // Clear the password-login cookie and any NextAuth (OAuth) session. signOut
+    // is a no-op when there is no OAuth session, so this is safe for both flows.
+    await logout()
+    await signOut({ redirect: false }).catch(() => undefined)
+    router.push('/login')
   }
 
   return (
