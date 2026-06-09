@@ -24,7 +24,7 @@ COPY migrations migrations
 COPY scripts/docker-init-entrypoint.sh docker-init-entrypoint.sh
 
 # install trivy binary for `TRIVY_REPO_SCAN` sync type
-RUN curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v0.31.3
+RUN curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.71.0/contrib/install.sh | sh -s -- -b /usr/local/bin v0.71.0
 
 # install syft binary
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v0.58.0
