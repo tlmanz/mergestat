@@ -32,6 +32,9 @@ const mapToSyncLogsData = (data: GetSyncHistoryLogsQuery | undefined): SyncTypeD
       title: s?.repoSyncTypeBySyncType?.shortName || '',
       brief: s?.repoSyncTypeBySyncType?.description || '',
       scheduleEnabled: s?.scheduleEnabled || false,
+      // syncIntervalSeconds/scheduleCron were added after the generated schema types; cast until codegen is re-run.
+      syncIntervalSeconds: (s as unknown as { syncIntervalSeconds?: number | null }).syncIntervalSeconds ?? null,
+      scheduleCron: (s as unknown as { scheduleCron?: string | null }).scheduleCron ?? null,
       typeGroup: s.repoSyncTypeBySyncType?.typeGroup || '',
       syncState: s?.repoSyncQueues.nodes.length !== 0 ? getStatus(s?.repoSyncQueues.nodes[0] as RepoSyncQueueW) : SYNC_STATUS.empty,
     }

@@ -2,9 +2,11 @@ import { Sidebar } from '@mergestat/blocks'
 import { ChartSquareBarIcon, CogIcon, DatabaseIcon, RepositoryIcon, TerminalIcon } from '@mergestat/icons'
 import { useRouter } from 'next/router'
 import React from 'react'
+import useIsAdmin from 'src/views/hooks/useIsAdmin'
 
 const SidebarView: React.FC = () => {
   const { pathname, push } = useRouter()
+  const { isAdmin } = useIsAdmin()
 
   const isSidebarActive = (path: string | RegExp) => !!pathname.match(path)?.length
 
@@ -78,18 +80,28 @@ const SidebarView: React.FC = () => {
           icon={<CogIcon className='t-icon' />}
           subNav={
             <>
-              <Sidebar.Item compact={false}
-                active={isSidebarActive('/settings/user-management')}
-                onClick={() => push('/settings/user-management')}
-                label='User Management' level='sub' />
+              {isAdmin && (
+                <Sidebar.Item compact={false}
+                  active={isSidebarActive('/settings/user-management')}
+                  onClick={() => push('/settings/user-management')}
+                  label='User Management' level='sub' />
+              )}
               <Sidebar.Item compact={false}
                 active={isSidebarActive('/settings/user-settings')}
                 onClick={() => push('/settings/user-settings')}
                 label='User Settings' level='sub' />
-              <Sidebar.Item compact={false}
-                active={isSidebarActive('/settings/oauth-roles')}
-                onClick={() => push('/settings/oauth-roles')}
-                label='OAuth Roles' level='sub' />
+              {isAdmin && (
+                <Sidebar.Item compact={false}
+                  active={isSidebarActive('/settings/oauth-roles')}
+                  onClick={() => push('/settings/oauth-roles')}
+                  label='OAuth Roles' level='sub' />
+              )}
+              {isAdmin && (
+                <Sidebar.Item compact={false}
+                  active={isSidebarActive('/settings/audit-log')}
+                  onClick={() => push('/settings/audit-log')}
+                  label='Audit Log' level='sub' />
+              )}
             </>
           } />
       </Sidebar.Main>

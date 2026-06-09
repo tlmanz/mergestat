@@ -139,6 +139,8 @@ export type SyncTypeInfo = {
   title: string
   brief: string
   scheduleEnabled: boolean
+  syncIntervalSeconds?: number | null
+  scheduleCron?: string | null
   typeGroup: string
   syncState: RepoSyncStateT
 }

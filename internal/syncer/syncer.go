@@ -52,22 +52,26 @@ const (
 var errGitHubTokenRequired = errors.New("in order to run this syncer, a GitHub authentication token must be present")
 
 type worker struct {
-	logger       *zerolog.Logger
-	pool         *pgxpool.Pool
-	mergestat    *sqlx.DB
-	db           *db.Queries
-	concurrency  int
-	pollInterval time.Duration
+	logger              *zerolog.Logger
+	pool                *pgxpool.Pool
+	mergestat           *sqlx.DB
+	db                  *db.Queries
+	concurrency         int
+	pollInterval        time.Duration
+	maxRetries          int
+	retryBackoffSeconds int
 }
 
-func New(pool *pgxpool.Pool, mergestat *sqlx.DB, logger *zerolog.Logger, concurrency int, pollInterval time.Duration) *worker {
+func New(pool *pgxpool.Pool, mergestat *sqlx.DB, logger *zerolog.Logger, concurrency int, pollInterval time.Duration, maxRetries, retryBackoffSeconds int) *worker {
 	return &worker{
-		logger:       logger,
-		pool:         pool,
-		mergestat:    mergestat,
-		db:           db.New(pool),
-		concurrency:  concurrency,
-		pollInterval: pollInterval,
+		logger:              logger,
+		pool:                pool,
+		mergestat:           mergestat,
+		db:                  db.New(pool),
+		concurrency:         concurrency,
+		pollInterval:        pollInterval,
+		maxRetries:          maxRetries,
+		retryBackoffSeconds: retryBackoffSeconds,
 	}
 }
 
@@ -132,11 +136,15 @@ func (w *worker) exec(ctx context.Context, id string) {
 						w.logger.Err(err).Msgf("error sending log error message: %v", err)
 					}
 
-					if err := w.db.SetSyncJobStatus(context.TODO(), db.SetSyncJobStatusParams{
-						Status: "DONE",
-						ID:     j.ID,
+					// Schedule a retry with backoff, or mark the job terminally FAILED
+					// once the retry budget is exhausted (which also advances the
+					// fairness anchor so a failing repo stops hogging the dequeue).
+					if err := w.db.FailOrRetrySyncJob(context.TODO(), db.FailOrRetrySyncJobParams{
+						ID:             j.ID,
+						MaxRetries:     int32(w.maxRetries),
+						BackoffSeconds: int32(w.retryBackoffSeconds),
 					}); err != nil {
-						w.logger.Err(err).Msgf("error marking sync job as done: %v", err)
+						w.logger.Err(err).Msgf("error failing/retrying sync job: %v", err)
 					}
 					continue
 				} else {

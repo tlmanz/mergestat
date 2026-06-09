@@ -16,6 +16,8 @@ const GET_SYNC_HISTORY_LOGS = gql`
           id
           syncType
           scheduleEnabled
+          syncIntervalSeconds
+          scheduleCron
           repoSyncTypeBySyncType {
             shortName
             description

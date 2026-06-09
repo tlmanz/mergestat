@@ -329,18 +329,90 @@ func (mr *MockQuerierMockRecorder) MarkRepoImportAsUpdated(ctx, id interface{}) 
 }
 
 // MarkSyncsAsTimedOut mocks base method.
-func (m *MockQuerier) MarkSyncsAsTimedOut(ctx context.Context) ([]int64, error) {
+func (m *MockQuerier) MarkSyncsAsTimedOut(ctx context.Context, arg db.MarkSyncsAsTimedOutParams) ([]int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "MarkSyncsAsTimedOut", ctx)
+	ret := m.ctrl.Call(m, "MarkSyncsAsTimedOut", ctx, arg)
 	ret0, _ := ret[0].([]int64)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // MarkSyncsAsTimedOut indicates an expected call of MarkSyncsAsTimedOut.
-func (mr *MockQuerierMockRecorder) MarkSyncsAsTimedOut(ctx interface{}) *gomock.Call {
+func (mr *MockQuerierMockRecorder) MarkSyncsAsTimedOut(ctx, arg interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkSyncsAsTimedOut", reflect.TypeOf((*MockQuerier)(nil).MarkSyncsAsTimedOut), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkSyncsAsTimedOut", reflect.TypeOf((*MockQuerier)(nil).MarkSyncsAsTimedOut), ctx, arg)
+}
+
+// FailOrRetrySyncJob mocks base method.
+func (m *MockQuerier) FailOrRetrySyncJob(ctx context.Context, arg db.FailOrRetrySyncJobParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FailOrRetrySyncJob", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// FailOrRetrySyncJob indicates an expected call of FailOrRetrySyncJob.
+func (mr *MockQuerierMockRecorder) FailOrRetrySyncJob(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FailOrRetrySyncJob", reflect.TypeOf((*MockQuerier)(nil).FailOrRetrySyncJob), ctx, arg)
+}
+
+// GetQueueStats mocks base method.
+func (m *MockQuerier) GetQueueStats(ctx context.Context) (db.GetQueueStatsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetQueueStats", ctx)
+	ret0, _ := ret[0].(db.GetQueueStatsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetQueueStats indicates an expected call of GetQueueStats.
+func (mr *MockQuerierMockRecorder) GetQueueStats(ctx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetQueueStats", reflect.TypeOf((*MockQuerier)(nil).GetQueueStats), ctx)
+}
+
+// ListDueCronSyncs mocks base method.
+func (m *MockQuerier) ListDueCronSyncs(ctx context.Context) ([]db.ListDueCronSyncsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListDueCronSyncs", ctx)
+	ret0, _ := ret[0].([]db.ListDueCronSyncsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListDueCronSyncs indicates an expected call of ListDueCronSyncs.
+func (mr *MockQuerierMockRecorder) ListDueCronSyncs(ctx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListDueCronSyncs", reflect.TypeOf((*MockQuerier)(nil).ListDueCronSyncs), ctx)
+}
+
+// EnqueueRepoSync mocks base method.
+func (m *MockQuerier) EnqueueRepoSync(ctx context.Context, id uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EnqueueRepoSync", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// EnqueueRepoSync indicates an expected call of EnqueueRepoSync.
+func (mr *MockQuerierMockRecorder) EnqueueRepoSync(ctx, id interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EnqueueRepoSync", reflect.TypeOf((*MockQuerier)(nil).EnqueueRepoSync), ctx, id)
+}
+
+// SetSyncNextRunAt mocks base method.
+func (m *MockQuerier) SetSyncNextRunAt(ctx context.Context, arg db.SetSyncNextRunAtParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetSyncNextRunAt", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetSyncNextRunAt indicates an expected call of SetSyncNextRunAt.
+func (mr *MockQuerierMockRecorder) SetSyncNextRunAt(ctx, arg interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetSyncNextRunAt", reflect.TypeOf((*MockQuerier)(nil).SetSyncNextRunAt), ctx, arg)
 }
 
 // SetLatestKeepAliveForJob mocks base method.

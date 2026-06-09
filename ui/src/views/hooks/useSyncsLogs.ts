@@ -17,12 +17,12 @@ const useSyncsLogs = (poll = false) => {
     ...(poll && { pollInterval: 5000 }),
   })
 
-  const { updateSchedule, syncNow } = useSyncNow('getSyncHistoryLogs')
+  const { updateSchedule, updateSyncInterval, updateSyncCron, syncNow } = useSyncNow('getSyncHistoryLogs')
 
   const repoData: SyncTypeData = useMemo(() => mapToSyncLogsData(data), [data])
   const title = `${repoData.sync?.title} - ${repoData.repo.name} - Repos  ${MERGESTAT_TITLE}`
 
-  return { loading, repoData, title, syncTypeId, updateSchedule, syncNow }
+  return { loading, repoData, title, syncTypeId, updateSchedule, updateSyncInterval, updateSyncCron, syncNow }
 }
 
 export default useSyncsLogs

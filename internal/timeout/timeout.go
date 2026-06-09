@@ -10,23 +10,30 @@ import (
 )
 
 type timeout struct {
-	logger *zerolog.Logger
-	pool   *pgxpool.Pool
-	db     *db.Queries
+	logger              *zerolog.Logger
+	pool                *pgxpool.Pool
+	db                  *db.Queries
+	maxRetries          int
+	retryBackoffSeconds int
 }
 
-func New(logger *zerolog.Logger, pool *pgxpool.Pool) *timeout {
+func New(logger *zerolog.Logger, pool *pgxpool.Pool, maxRetries, retryBackoffSeconds int) *timeout {
 	return &timeout{
-		logger: logger,
-		pool:   pool,
-		db:     db.New(pool),
+		logger:              logger,
+		pool:                pool,
+		db:                  db.New(pool),
+		maxRetries:          maxRetries,
+		retryBackoffSeconds: retryBackoffSeconds,
 	}
 }
 
 func (s *timeout) Start(ctx context.Context, interval time.Duration) {
 	s.logger.Info().Msg("starting timeout routine")
 	exec := func() {
-		if timedOutSyncJobIDs, err := s.db.MarkSyncsAsTimedOut(ctx); err != nil {
+		if timedOutSyncJobIDs, err := s.db.MarkSyncsAsTimedOut(ctx, db.MarkSyncsAsTimedOutParams{
+			MaxRetries:     int32(s.maxRetries),
+			BackoffSeconds: int32(s.retryBackoffSeconds),
+		}); err != nil {
 			s.logger.Err(err).Msg("encountered error during job timeout execution")
 		} else if len(timedOutSyncJobIDs) > 0 {
 			s.logger.Info().Msgf("timed out %d sync job(s)", len(timedOutSyncJobIDs))

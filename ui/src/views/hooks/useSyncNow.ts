@@ -1,6 +1,6 @@
 import { useMutation } from '@apollo/client'
 import { AddSyncTypeMutation } from 'src/api-logic/graphql/generated/schema'
-import { ADD_SYNC_TYPE, SYNC_NOW, UPDATE_SCHEDULE } from 'src/api-logic/graphql/mutations/syncs'
+import { ADD_SYNC_TYPE, SYNC_NOW, UPDATE_SCHEDULE, UPDATE_SYNC_CRON, UPDATE_SYNC_INTERVAL } from 'src/api-logic/graphql/mutations/syncs'
 
 const useSyncNow = (refetch: string, schedule = false) => {
   const [syncNow] = useMutation(SYNC_NOW, {
@@ -30,7 +30,17 @@ const useSyncNow = (refetch: string, schedule = false) => {
     refetchQueries: () => [refetch]
   })
 
-  return { syncNow, addSyncType, updateSchedule }
+  const [updateSyncInterval] = useMutation(UPDATE_SYNC_INTERVAL, {
+    awaitRefetchQueries: true,
+    refetchQueries: () => [refetch]
+  })
+
+  const [updateSyncCron] = useMutation(UPDATE_SYNC_CRON, {
+    awaitRefetchQueries: true,
+    refetchQueries: () => [refetch]
+  })
+
+  return { syncNow, addSyncType, updateSchedule, updateSyncInterval, updateSyncCron }
 }
 
 export default useSyncNow

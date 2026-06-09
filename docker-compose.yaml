@@ -41,6 +41,13 @@ services:
     environment:
       POSTGRES_CONNECTION: postgres://postgres:${POSTGRES_PASSWORD:-password}@postgres:5432/postgres?sslmode=disable
       CONCURRENCY: 5
+      # Retry policy for failed/timed-out syncs: up to SYNC_MAX_RETRIES attempts with
+      # exponential backoff starting at SYNC_RETRY_BACKOFF_SECONDS; then marked FAILED.
+      SYNC_MAX_RETRIES: ${SYNC_MAX_RETRIES:-3}
+      SYNC_RETRY_BACKOFF_SECONDS: ${SYNC_RETRY_BACKOFF_SECONDS:-60}
+      # GIT_COMMITS sync walks every branch by default (commits only on non-default branches
+      # are included). Set to 0 to sync the default branch (HEAD) only.
+      GIT_SYNC_ALL_BRANCHES: ${GIT_SYNC_ALL_BRANCHES:-1}
       GITHUB_RATE_LIMIT: 1/2
       ENCRYPTION_SECRET: ${ENCRYPTION_SECRET:-password}
       LOG_LEVEL: debug
@@ -123,27 +130,31 @@ services:
     labels:
       shipyard.route: '/'
 
-  # grafana:
-  #   image: grafana/grafana-oss:latest
-  #   user: root
-  #   environment:
-  #     PGHOST: postgres
-  #     PGUSER: postgres
-  #     PGPASSWORD: ${POSTGRES_PASSWORD:-password}
-  #     PGDATABASE: postgres
-  #   ports:
-  #     - 3000:3000
-  #   depends_on:
-  #     - postgres
-  #   restart: always
-  #   volumes:
-  #     - grafana_lib:/var/lib/grafana
-  #     - grafana_etc:/etc/grafana
-  #     - grafana_log:/var/log/grafana
-  #     - ./scripts/grafana/grafana.ini:/etc/grafana/grafana.ini
-  #     - ./scripts/grafana/provisioning:/etc/grafana/provisioning
-  #     - ./examples:/var/lib/examples
-  #     - /var/lib/grafana/dashboards/
-  #   entrypoint: [ "bash" ]
-  #   command: > # This is to set the datasource id in the examples to the datasource created for local grafana
-  #     -cx 'cp -r /var/lib/examples/* /var/lib/grafana/dashboards/ && find /var/lib/grafana/dashboards/ -name ''*.json'' | xargs grep -rnl "$${DS_POSTGRES}" | xargs -i@ sed -i "s/\$${DS_POSTGRES}/SXQZgpP7z/g" @ && exec grafana-server --config="/etc/grafana/grafana.ini"'
+  # --- Observability (Prometheus + Grafana) ---
+  # Prometheus scrapes the worker's /metrics endpoint (requires DEBUG=1 on the worker,
+  # which is set above). Grafana ships a prebuilt "MergeStat — Repo Syncs" dashboard.
+  # Browse Grafana at http://localhost:3000 (anonymous viewer access is enabled).
+  prometheus:
+    image: prom/prometheus:latest
+    restart: always
+    depends_on:
+      - worker
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - 9090:9090
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    restart: always
+    depends_on:
+      - prometheus
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - 3000:3000

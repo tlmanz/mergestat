@@ -133,6 +133,7 @@ export function mapToRepoSyncStateT(status: string): RepoSyncStateT {
     case 'WARNING':
       return SYNC_STATUS.warning
     case 'ERROR':
+    case 'FAILED':
       return SYNC_STATUS.error
     case 'DISABLED':
       return SYNC_STATUS.disabled

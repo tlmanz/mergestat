@@ -16,8 +16,9 @@ import (
 	uuid "github.com/satori/go.uuid"
 )
 
-// sendBatchCommits uses the pg COPY protocol to send a batch of commits
-func (w *worker) sendBatchCommits(ctx context.Context, tx pgx.Tx, j *db.DequeueSyncJobRow, jsonTmpPath string) (int, error) {
+// sendBatchCommits uses the pg COPY protocol to send a batch of commits into the given
+// target table (the real git_commits table, or a temp staging table for incremental syncs).
+func (w *worker) sendBatchCommits(ctx context.Context, tx pgx.Tx, j *db.DequeueSyncJobRow, jsonTmpPath string, target pgx.Identifier) (int, error) {
 	var (
 		f   *os.File
 		err error
@@ -69,7 +70,7 @@ func (w *worker) sendBatchCommits(ctx context.Context, tx pgx.Tx, j *db.DequeueS
 				break
 			}
 		}
-		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"git_commits"}, []string{"repo_id", "hash", "message", "author_name", "author_email", "author_when", "committer_name", "committer_email", "committer_when", "parents"}, pgx.CopyFromRows(inputs)); err != nil {
+		if _, err := tx.CopyFrom(ctx, target, []string{"repo_id", "hash", "message", "author_name", "author_email", "author_when", "committer_name", "committer_email", "committer_when", "parents"}, pgx.CopyFromRows(inputs)); err != nil {
 			return 0, err
 		}
 		insertedCommits += len(inputs)
@@ -124,8 +125,21 @@ func (w *worker) collectCommits(ctx context.Context, tmpPath string) (string, er
 	}
 	defer walk.Free()
 
+	// Always include the default branch (HEAD).
 	if err := walk.PushHead(); err != nil {
 		return "", err
+	}
+
+	// Optionally include every other branch so commits that only exist on non-default
+	// branches are synced too. The clone fetches all branches (go-git's SingleBranch is
+	// off by default), so their tips are available as refs/remotes/origin/*. The revwalk
+	// de-duplicates commits reachable from multiple branches. Controlled by
+	// GIT_SYNC_ALL_BRANCHES (default on; set to "0" to sync the default branch only).
+	if os.Getenv("GIT_SYNC_ALL_BRANCHES") != "0" {
+		if err := walk.PushGlob("refs/remotes/origin/*"); err != nil {
+			// don't fail the whole sync if globbing branches fails — HEAD is still walked
+			w.logger.Warn().Err(err).Msg("could not push all branches onto revwalk; syncing default branch only")
+		}
 	}
 
 	if err := walk.Iterate(func(c *libgit2.Commit) bool {
@@ -205,29 +219,49 @@ func (w *worker) handleGitCommits(ctx context.Context, j *db.DequeueSyncJobRow) 
 		}
 	}()
 
-	r, err := tx.Exec(ctx, "DELETE FROM git_commits WHERE repo_id = $1;", j.RepoID.String())
+	// Incremental sync. Commits are immutable and uniquely keyed by (repo_id, hash) (the
+	// commits_pkey unique index). Instead of deleting every commit and re-inserting them all
+	// on each run, COPY the walked commits into a session-temp staging table, insert only the
+	// ones we don't already have, and prune any commits that have dropped out of history
+	// (e.g. after a force-push or rebase). This avoids re-writing unchanged rows entirely.
+	if _, err = tx.Exec(ctx, `CREATE TEMP TABLE _git_commits_staging (
+		repo_id uuid, hash text, message text,
+		author_name text, author_email text, author_when timestamptz,
+		committer_name text, committer_email text, committer_when timestamptz,
+		parents integer
+	) ON COMMIT DROP;`); err != nil {
+		return err
+	}
+
+	var stagedCommits int
+	if stagedCommits, err = w.sendBatchCommits(ctx, tx, j, jsonTmpPath, pgx.Identifier{"_git_commits_staging"}); err != nil {
+		return err
+	}
+
+	insRes, err := tx.Exec(ctx, `
+		INSERT INTO git_commits (repo_id, hash, message, author_name, author_email, author_when, committer_name, committer_email, committer_when, parents)
+		SELECT repo_id, hash, message, author_name, author_email, author_when, committer_name, committer_email, committer_when, parents
+		FROM _git_commits_staging
+		ON CONFLICT (repo_id, hash) DO NOTHING;`)
+	if err != nil {
+		return err
+	}
+	insertedCommits := int(insRes.RowsAffected())
+
+	delRes, err := tx.Exec(ctx, `
+		DELETE FROM git_commits gc
+		WHERE gc.repo_id = $1
+		AND NOT EXISTS (SELECT 1 FROM _git_commits_staging s WHERE s.repo_id = gc.repo_id AND s.hash = gc.hash);`, j.RepoID.String())
 	if err != nil {
 		return err
 	}
 
-	if err := w.sendBatchLogMessages(ctx, []*syncLog{{
-		Type:            SyncLogTypeInfo,
-		RepoSyncQueueID: j.ID,
-		Message:         fmt.Sprintf("removed %d row(s) from git_commits", r.RowsAffected()),
-	}}); err != nil {
-		return err
-	}
-	var insertedCommits int
-	if insertedCommits, err = w.sendBatchCommits(ctx, tx, j, jsonTmpPath); err != nil {
-		return err
-	}
-
-	l.Info().Msgf("sent batch of %d commits", insertedCommits)
+	l.Info().Msgf("git_commits incremental sync: %d in history, %d inserted, %d pruned", stagedCommits, insertedCommits, delRes.RowsAffected())
 
 	if err := w.sendBatchLogMessages(ctx, []*syncLog{{
 		Type:            SyncLogTypeInfo,
 		RepoSyncQueueID: j.ID,
-		Message:         fmt.Sprintf("inserted %d row(s) into git_commits", insertedCommits),
+		Message:         fmt.Sprintf("inserted %d new and pruned %d row(s) in git_commits (%d in history)", insertedCommits, delRes.RowsAffected(), stagedCommits),
 	}}); err != nil {
 		return err
 	}

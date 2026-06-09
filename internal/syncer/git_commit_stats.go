@@ -109,8 +109,17 @@ func (w *worker) handleGitCommitStats(ctx context.Context, j *db.DequeueSyncJobR
 	}
 	defer walk.Free()
 
+	// Always include the default branch (HEAD).
 	if err := walk.PushHead(); err != nil {
 		return err
+	}
+
+	// Include commits on every other branch too (see GIT_SYNC_ALL_BRANCHES in git_commits.go).
+	// The clone fetches all branches; the revwalk de-duplicates shared commits.
+	if os.Getenv("GIT_SYNC_ALL_BRANCHES") != "0" {
+		if err := walk.PushGlob("refs/remotes/origin/*"); err != nil {
+			w.logger.Warn().Err(err).Msg("could not push all branches onto revwalk; using default branch only")
+		}
 	}
 
 	if err := walk.Iterate(func(c *libgit2.Commit) bool {

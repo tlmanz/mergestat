@@ -42,6 +42,29 @@ const UPDATE_SCHEDULE = gql`
   }
 `
 
+const UPDATE_SYNC_INTERVAL = gql`
+  mutation syncInterval($syncId: UUID!, $seconds: Int) {
+    updateRepoSync(input: {patch: {syncIntervalSeconds: $seconds}, id: $syncId}) {
+      repoSync {
+        id
+        syncType
+        syncIntervalSeconds
+      }
+    }
+  }
+`
+
+const UPDATE_SYNC_CRON = gql`
+  mutation syncCron($syncId: UUID!, $cron: String) {
+    updateRepoSync(input: {patch: {scheduleCron: $cron}, id: $syncId}) {
+      repoSync {
+        id
+        scheduleCron
+      }
+    }
+  }
+`
+
 const ADD_CONTAINER_SYNC_SCHEDULE = gql`
   mutation addContainerSyncSchedule($syncId: UUID!) {
     createContainerSyncSchedule(input: {containerSyncSchedule: {syncId: $syncId}}) {
@@ -110,6 +133,8 @@ export {
   SYNC_NOW,
   ADD_SYNC_TYPE,
   UPDATE_SCHEDULE,
+  UPDATE_SYNC_INTERVAL,
+  UPDATE_SYNC_CRON,
   ADD_CONTAINER_SYNC_SCHEDULE,
   REMOVE_CONTAINER_SYNC_SCHEDULE,
   ENABLE_CONTAINER_SYNC,

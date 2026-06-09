@@ -40,6 +40,7 @@ import (
 	"github.com/mergestat/mergestat-lite/extensions/services"
 	"github.com/mergestat/mergestat-lite/pkg/locator"
 	_ "github.com/mergestat/mergestat-lite/pkg/sqlite"
+	"github.com/mergestat/mergestat/internal/metrics"
 	"github.com/mergestat/mergestat/internal/scheduler"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
@@ -286,9 +287,27 @@ func main() {
 			logger.Err(err).Msgf("Incorrect value for SYNCER_INTERVAL_SECONDS")
 		}
 	}
+
+	// retry policy for failed/timed-out syncs: up to maxRetries attempts with exponential
+	// backoff starting from retryBackoffSeconds; once exhausted a job is marked FAILED.
+	maxRetries := 3
+	retryBackoffSeconds := 60
+	if v := os.Getenv("SYNC_MAX_RETRIES"); len(v) != 0 {
+		if maxRetries, err = strconv.Atoi(v); err != nil {
+			logger.Err(err).Msgf("Incorrect value for SYNC_MAX_RETRIES")
+		}
+	}
+	if v := os.Getenv("SYNC_RETRY_BACKOFF_SECONDS"); len(v) != 0 {
+		if retryBackoffSeconds, err = strconv.Atoi(v); err != nil {
+			logger.Err(err).Msgf("Incorrect value for SYNC_RETRY_BACKOFF_SECONDS")
+		}
+	}
+
 	go scheduler.New(&logger, pool).Start(ctx, time.Duration(schedulerInterval)*time.Minute)
-	go timeout.New(&logger, pool).Start(ctx, time.Minute)
-	go syncer.New(pool, embedded, &logger, concurrency, time.Duration(syncerInterval)*time.Second).Start(ctx)
+	go timeout.New(&logger, pool, maxRetries, retryBackoffSeconds).Start(ctx, time.Minute)
+	// refresh sync-queue Prometheus gauges (served by the /metrics endpoint below)
+	go metrics.New(&logger, pool).Start(ctx, 15*time.Second)
+	go syncer.New(pool, embedded, &logger, concurrency, time.Duration(syncerInterval)*time.Second, maxRetries, retryBackoffSeconds).Start(ctx)
 
 	// run a basic cron every minute to schedule a repos/auto-import job
 	// these jobs are idempotent, and so, multiple instances can run at same time without conflict

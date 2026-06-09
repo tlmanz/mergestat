@@ -56,7 +56,13 @@ const RepoDataLogsDetailsView: React.FC<SyncTypeData> = ({ repo, sync, logs }) =
       </div>
 
       <div className="flex-1 overflow-auto p-8 space-y-8">
-        <LogsInfo id={logInfo?.id || ''} syncStart={logInfo?.syncStart || ''} duration={logInfo?.duration || ''} />
+        <LogsInfo
+          id={logInfo?.id || ''}
+          syncStart={logInfo?.syncStart || ''}
+          duration={logInfo?.duration || ''}
+          status={logInfo?.syncType}
+          latestLog={logInfo?.logs?.[logInfo.logs.length - 1]}
+        />
         {logInfo?.logs?.length
           ? <LogBox logs={logInfo?.logs || []} onCopy={() => copyArrayToClipboard(logInfo?.logs)} />
           : (

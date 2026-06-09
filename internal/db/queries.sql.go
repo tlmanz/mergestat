@@ -82,9 +82,15 @@ dequeued AS (
         SELECT rsq.id
         FROM mergestat.repo_sync_queue rsq
         INNER JOIN mergestat.repo_sync_type_groups rstg ON rsq.type_group = rstg.group
-        WHERE status = 'QUEUED'
+        INNER JOIN mergestat.repo_syncs rs ON rs.id = rsq.repo_sync_id
+        LEFT JOIN mergestat.repo_sync_queue lc ON lc.id = rs.last_completed_repo_sync_queue_id
+        WHERE rsq.status = 'QUEUED'
+        -- honour retry backoff: a job scheduled for a future retry is not yet eligible
+        AND (rsq.next_retry_at IS NULL OR rsq.next_retry_at <= now())
         AND rstg.concurrent_syncs > (SELECT COUNT(*) FROM running WHERE running.group = rstg.group)
-        ORDER BY rsq.priority ASC, rsq.created_at ASC, rsq.id ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+        -- Fairness: pick the least-recently-synced (or never-synced) sync first, so every repo
+        -- gets one sync before any repo is synced again. Priority/created_at break ties.
+        ORDER BY lc.done_at ASC NULLS FIRST, rsq.priority ASC, rsq.created_at ASC, rsq.id ASC LIMIT 1 FOR UPDATE OF rsq SKIP LOCKED
    ) RETURNING id, created_at, status, repo_sync_id
 )
 SELECT
@@ -172,7 +178,17 @@ SELECT
 FROM mergestat.repo_syncs rs
 INNER JOIN mergestat.repo_sync_types AS rst ON rs.sync_type = rst.type
 WHERE schedule_enabled
+    -- cron-scheduled syncs are driven by the scheduler's cron path, not the continuous one
+    AND rs.schedule_cron IS NULL
     AND id NOT IN (SELECT repo_sync_id FROM mergestat.repo_sync_queue WHERE status = 'RUNNING' OR status = 'QUEUED')
+    -- Respect the per-sync minimum interval (cooldown): skip if the last completed run
+    -- is more recent than sync_interval_seconds ago. NULL interval = no minimum.
+    AND (
+        rs.sync_interval_seconds IS NULL
+        OR rs.last_completed_repo_sync_queue_id IS NULL
+        OR (SELECT lc.done_at FROM mergestat.repo_sync_queue lc WHERE lc.id = rs.last_completed_repo_sync_queue_id)
+            < now() - (rs.sync_interval_seconds * interval '1 second')
+    )
     AND NOT EXISTS (
         SELECT rq.done_at
         FROM ranked_queue rq
@@ -543,36 +559,169 @@ func (q *Queries) MarkRepoImportAsUpdated(ctx context.Context, id uuid.UUID) err
 }
 
 const markSyncsAsTimedOut = `-- name: MarkSyncsAsTimedOut :many
-WITH timed_out_sync_jobs AS (
-    UPDATE mergestat.repo_sync_queue SET status = 'DONE' WHERE status = 'RUNNING' AND (
-        (last_keep_alive < now() - '10 minutes'::interval)
+WITH timed_out AS (
+    UPDATE mergestat.repo_sync_queue q SET
+        status = CASE WHEN q.retry_count < $1::INT THEN 'QUEUED' ELSE 'FAILED' END,
+        retry_count = CASE WHEN q.retry_count < $1::INT THEN q.retry_count + 1 ELSE q.retry_count END,
+        next_retry_at = CASE WHEN q.retry_count < $1::INT
+            THEN now() + (($2::INT * power(2, LEAST(q.retry_count, 6)))::INT * interval '1 second')
+            ELSE q.next_retry_at END,
+        started_at = CASE WHEN q.retry_count < $1::INT THEN NULL ELSE q.started_at END,
+        last_keep_alive = CASE WHEN q.retry_count < $1::INT THEN NULL ELSE q.last_keep_alive END
+    WHERE q.status = 'RUNNING' AND (
+        (q.last_keep_alive < now() - '10 minutes'::interval)
         OR
-        (last_keep_alive IS NULL AND started_at < now() - '10 minutes'::interval)) -- if worker crashed before last_keep_alive was first set
-    RETURNING id, created_at, repo_sync_id, status, started_at, done_at, last_keep_alive, priority, type_group
+        (q.last_keep_alive IS NULL AND q.started_at < now() - '10 minutes'::interval)) -- if worker crashed before last_keep_alive was first set
+    RETURNING q.id, q.repo_sync_id, q.status
+),
+advance_anchor AS (
+    UPDATE mergestat.repo_syncs rs SET last_completed_repo_sync_queue_id = t.id
+    FROM timed_out t WHERE rs.id = t.repo_sync_id AND t.status = 'FAILED'
+),
+logged AS (
+    INSERT INTO mergestat.repo_sync_logs (repo_sync_queue_id, log_type, message)
+    SELECT id, 'ERROR', 'No response from job within reasonable interval. Timing out.' FROM timed_out
 )
-INSERT INTO mergestat.repo_sync_logs (repo_sync_queue_id, log_type, message)
-SELECT id, 'ERROR', 'No response from job within reasonable interval. Timing out.' FROM timed_out_sync_jobs
-RETURNING repo_sync_queue_id
+SELECT id FROM timed_out
 `
 
-func (q *Queries) MarkSyncsAsTimedOut(ctx context.Context) ([]int64, error) {
-	rows, err := q.db.Query(ctx, markSyncsAsTimedOut)
+type MarkSyncsAsTimedOutParams struct {
+	MaxRetries     int32
+	BackoffSeconds int32
+}
+
+func (q *Queries) MarkSyncsAsTimedOut(ctx context.Context, arg MarkSyncsAsTimedOutParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, markSyncsAsTimedOut, arg.MaxRetries, arg.BackoffSeconds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var items []int64
 	for rows.Next() {
-		var repo_sync_queue_id int64
-		if err := rows.Scan(&repo_sync_queue_id); err != nil {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		items = append(items, repo_sync_queue_id)
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return items, nil
+}
+
+const failOrRetrySyncJob = `-- name: FailOrRetrySyncJob :exec
+SELECT mergestat.fail_or_retry_sync_job($1::BIGINT, $2::INT, $3::INT)
+`
+
+type FailOrRetrySyncJobParams struct {
+	ID             int64
+	MaxRetries     int32
+	BackoffSeconds int32
+}
+
+func (q *Queries) FailOrRetrySyncJob(ctx context.Context, arg FailOrRetrySyncJobParams) error {
+	_, err := q.db.Exec(ctx, failOrRetrySyncJob, arg.ID, arg.MaxRetries, arg.BackoffSeconds)
+	return err
+}
+
+const getQueueStats = `-- name: GetQueueStats :one
+SELECT
+    COUNT(*) FILTER (WHERE status = 'QUEUED')::bigint AS queued,
+    COUNT(*) FILTER (WHERE status = 'RUNNING')::bigint AS running,
+    COUNT(*) FILTER (WHERE status = 'DONE')::bigint AS done,
+    COUNT(*) FILTER (WHERE status = 'FAILED')::bigint AS failed,
+    COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at) FILTER (WHERE status = 'QUEUED'))), 0)::float8 AS oldest_queued_seconds,
+    COUNT(*) FILTER (WHERE status = 'FAILED' AND done_at > now() - interval '24 hours')::bigint AS failed_24h,
+    COUNT(*) FILTER (WHERE status = 'DONE' AND done_at > now() - interval '24 hours')::bigint AS done_24h
+FROM mergestat.repo_sync_queue
+`
+
+type GetQueueStatsRow struct {
+	Queued              int64
+	Running             int64
+	Done                int64
+	Failed              int64
+	OldestQueuedSeconds float64
+	Failed24h           int64
+	Done24h             int64
+}
+
+func (q *Queries) GetQueueStats(ctx context.Context) (GetQueueStatsRow, error) {
+	row := q.db.QueryRow(ctx, getQueueStats)
+	var i GetQueueStatsRow
+	err := row.Scan(
+		&i.Queued,
+		&i.Running,
+		&i.Done,
+		&i.Failed,
+		&i.OldestQueuedSeconds,
+		&i.Failed24h,
+		&i.Done24h,
+	)
+	return i, err
+}
+
+const listDueCronSyncs = `-- name: ListDueCronSyncs :many
+SELECT rs.id, rs.schedule_cron
+FROM mergestat.repo_syncs rs
+WHERE rs.schedule_enabled
+    AND rs.schedule_cron IS NOT NULL
+    AND (rs.next_run_at IS NULL OR rs.next_run_at <= now())
+    AND rs.id NOT IN (SELECT repo_sync_id FROM mergestat.repo_sync_queue WHERE status = 'RUNNING' OR status = 'QUEUED')
+`
+
+type ListDueCronSyncsRow struct {
+	ID           uuid.UUID
+	ScheduleCron sql.NullString
+}
+
+func (q *Queries) ListDueCronSyncs(ctx context.Context) ([]ListDueCronSyncsRow, error) {
+	rows, err := q.db.Query(ctx, listDueCronSyncs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDueCronSyncsRow
+	for rows.Next() {
+		var i ListDueCronSyncsRow
+		if err := rows.Scan(&i.ID, &i.ScheduleCron); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const enqueueRepoSync = `-- name: EnqueueRepoSync :exec
+INSERT INTO mergestat.repo_sync_queue (repo_sync_id, status, priority, type_group)
+SELECT rs.id, 'QUEUED', rs.priority, rst.type_group
+FROM mergestat.repo_syncs rs
+INNER JOIN mergestat.repo_sync_types rst ON rs.sync_type = rst.type
+WHERE rs.id = $1::uuid
+    AND rs.id NOT IN (SELECT repo_sync_id FROM mergestat.repo_sync_queue WHERE status = 'RUNNING' OR status = 'QUEUED')
+`
+
+func (q *Queries) EnqueueRepoSync(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, enqueueRepoSync, id)
+	return err
+}
+
+const setSyncNextRunAt = `-- name: SetSyncNextRunAt :exec
+UPDATE mergestat.repo_syncs SET next_run_at = $1 WHERE id = $2::uuid
+`
+
+type SetSyncNextRunAtParams struct {
+	NextRunAt sql.NullTime
+	ID        uuid.UUID
+}
+
+func (q *Queries) SetSyncNextRunAt(ctx context.Context, arg SetSyncNextRunAtParams) error {
+	_, err := q.db.Exec(ctx, setSyncNextRunAt, arg.NextRunAt, arg.ID)
+	return err
 }
 
 const setLatestKeepAliveForJob = `-- name: SetLatestKeepAliveForJob :exec

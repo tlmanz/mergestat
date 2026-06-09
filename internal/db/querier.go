@@ -22,9 +22,12 @@ type Querier interface {
 	// This allows us to make sure all repo syncs complete before we reschedule a new batch.
 	// We have now also added a concept of type groups which allows us to apply this same logic but by each group type which is where the PARTITION BY clause comes into play
 	EnqueueAllSyncs(ctx context.Context) error
+	EnqueueRepoSync(ctx context.Context, id uuid.UUID) error
+	FailOrRetrySyncJob(ctx context.Context, arg FailOrRetrySyncJobParams) error
 	FetchContainerSync(ctx context.Context, id uuid.UUID) (FetchContainerSyncRow, error)
 	FetchGitHubToken(ctx context.Context, pgpSymDecrypt string) (string, error)
 	FetchImportJob(ctx context.Context, id uuid.UUID) (FetchImportJobRow, error)
+	GetQueueStats(ctx context.Context) (GetQueueStatsRow, error)
 	GetRepoById(ctx context.Context, id uuid.UUID) (Repo, error)
 	GetRepoIDsFromRepoImport(ctx context.Context, arg GetRepoIDsFromRepoImportParams) ([]uuid.UUID, error)
 	GetRepoImportByID(ctx context.Context, id uuid.UUID) (MergestatRepoImport, error)
@@ -32,11 +35,13 @@ type Querier interface {
 	InsertGitHubRepoInfo(ctx context.Context, arg InsertGitHubRepoInfoParams) error
 	InsertNewDefaultSync(ctx context.Context, arg InsertNewDefaultSyncParams) error
 	InsertSyncJobLog(ctx context.Context, arg InsertSyncJobLogParams) error
+	ListDueCronSyncs(ctx context.Context) ([]ListDueCronSyncsRow, error)
 	ListRepoImportsDueForImport(ctx context.Context) ([]ListRepoImportsDueForImportRow, error)
 	MarkRepoImportAsUpdated(ctx context.Context, id uuid.UUID) error
-	MarkSyncsAsTimedOut(ctx context.Context) ([]int64, error)
+	MarkSyncsAsTimedOut(ctx context.Context, arg MarkSyncsAsTimedOutParams) ([]int64, error)
 	SetLatestKeepAliveForJob(ctx context.Context, id int64) error
 	SetSyncJobStatus(ctx context.Context, arg SetSyncJobStatusParams) error
+	SetSyncNextRunAt(ctx context.Context, arg SetSyncNextRunAtParams) error
 	UpdateImportStatus(ctx context.Context, arg UpdateImportStatusParams) error
 	UpsertRepo(ctx context.Context, arg UpsertRepoParams) error
 	UpsertWorkflowRunJobs(ctx context.Context, arg UpsertWorkflowRunJobsParams) error

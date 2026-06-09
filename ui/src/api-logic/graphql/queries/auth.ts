@@ -6,6 +6,12 @@ const CURRENT_USER = gql`
   }
 `
 
+const IS_ADMIN = gql`
+  query isAdmin {
+    currentMergeStatUserIsAdmin
+  }
+`
+
 const GET_DB_CONNECTION = gql`
   query getDatabaseConnection {
     databaseConnection {
@@ -17,4 +23,4 @@ const GET_DB_CONNECTION = gql`
   }
 `
 
-export { CURRENT_USER, GET_DB_CONNECTION }
+export { CURRENT_USER, GET_DB_CONNECTION, IS_ADMIN }

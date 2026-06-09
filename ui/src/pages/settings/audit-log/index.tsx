@@ -3,14 +3,12 @@ import Head from 'next/head'
 import { useRouter } from 'next/router'
 import { Fragment, useEffect } from 'react'
 import { MERGESTAT_TITLE } from 'src/utils/constants'
-
-import { UserSettingsProvider } from 'src/state/contexts'
 import useCrumbsInit from 'src/views/hooks/useCrumbsInit'
 import useIsAdmin from 'src/views/hooks/useIsAdmin'
-import UserManagement from 'src/views/settings/user-management'
+import AuditLog from 'src/views/settings/audit-log'
 
-const UserManagementPage: NextPage = () => {
-  const title = `User Management - Settings ${MERGESTAT_TITLE}`
+const AuditLogPage: NextPage = () => {
+  const title = `Audit Log - Settings ${MERGESTAT_TITLE}`
   const router = useRouter()
   const { loading, isAdmin } = useIsAdmin()
   useCrumbsInit()
@@ -30,11 +28,9 @@ const UserManagementPage: NextPage = () => {
       <Head>
         <title>{title}</title>
       </Head>
-      <UserSettingsProvider>
-        <UserManagement />
-      </UserSettingsProvider>
+      <AuditLog />
     </Fragment>
   )
 }
 
-export default UserManagementPage
+export default AuditLogPage

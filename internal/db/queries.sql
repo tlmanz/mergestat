@@ -51,9 +51,15 @@ dequeued AS (
         SELECT rsq.id
         FROM mergestat.repo_sync_queue rsq
         INNER JOIN mergestat.repo_sync_type_groups rstg ON rsq.type_group = rstg.group
-        WHERE status = 'QUEUED'
+        INNER JOIN mergestat.repo_syncs rs ON rs.id = rsq.repo_sync_id
+        LEFT JOIN mergestat.repo_sync_queue lc ON lc.id = rs.last_completed_repo_sync_queue_id
+        WHERE rsq.status = 'QUEUED'
+        -- honour retry backoff: a job scheduled for a future retry is not yet eligible
+        AND (rsq.next_retry_at IS NULL OR rsq.next_retry_at <= now())
         AND rstg.concurrent_syncs > (SELECT COUNT(*) FROM running WHERE running.group = rstg.group)
-        ORDER BY rsq.priority ASC, rsq.created_at ASC, rsq.id ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+        -- Fairness: pick the least-recently-synced (or never-synced) sync first, so every repo
+        -- gets one sync before any repo is synced again. Priority/created_at break ties.
+        ORDER BY lc.done_at ASC NULLS FIRST, rsq.priority ASC, rsq.created_at ASC, rsq.id ASC LIMIT 1 FOR UPDATE OF rsq SKIP LOCKED
    ) RETURNING id, created_at, status, repo_sync_id
 )
 SELECT
@@ -89,6 +95,43 @@ INSERT INTO mergestat.repo_sync_logs (log_type, message, repo_sync_queue_id) VAL
 -- name: SetSyncJobStatus :exec
 SELECT mergestat.set_sync_job_status(@Status::TEXT, @ID::BIGINT);
 
+-- name: FailOrRetrySyncJob :exec
+SELECT mergestat.fail_or_retry_sync_job(@ID::BIGINT, @MaxRetries::INT, @BackoffSeconds::INT);
+
+-- name: GetQueueStats :one
+-- Aggregate repo-sync-queue health for Prometheus metrics.
+SELECT
+    COUNT(*) FILTER (WHERE status = 'QUEUED')::bigint AS queued,
+    COUNT(*) FILTER (WHERE status = 'RUNNING')::bigint AS running,
+    COUNT(*) FILTER (WHERE status = 'DONE')::bigint AS done,
+    COUNT(*) FILTER (WHERE status = 'FAILED')::bigint AS failed,
+    COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at) FILTER (WHERE status = 'QUEUED'))), 0)::float8 AS oldest_queued_seconds,
+    COUNT(*) FILTER (WHERE status = 'FAILED' AND done_at > now() - interval '24 hours')::bigint AS failed_24h,
+    COUNT(*) FILTER (WHERE status = 'DONE' AND done_at > now() - interval '24 hours')::bigint AS done_24h
+FROM mergestat.repo_sync_queue;
+
+-- name: ListDueCronSyncs :many
+-- Cron-scheduled syncs that are due (next_run_at in the past or never computed) and not
+-- already queued/running. The scheduler parses schedule_cron to enqueue and advance next_run_at.
+SELECT rs.id, rs.schedule_cron
+FROM mergestat.repo_syncs rs
+WHERE rs.schedule_enabled
+    AND rs.schedule_cron IS NOT NULL
+    AND (rs.next_run_at IS NULL OR rs.next_run_at <= now())
+    AND rs.id NOT IN (SELECT repo_sync_id FROM mergestat.repo_sync_queue WHERE status = 'RUNNING' OR status = 'QUEUED');
+
+-- name: EnqueueRepoSync :exec
+-- Enqueue a single sync (used by the cron scheduler), guarding against double-enqueue.
+INSERT INTO mergestat.repo_sync_queue (repo_sync_id, status, priority, type_group)
+SELECT rs.id, 'QUEUED', rs.priority, rst.type_group
+FROM mergestat.repo_syncs rs
+INNER JOIN mergestat.repo_sync_types rst ON rs.sync_type = rst.type
+WHERE rs.id = @ID::uuid
+    AND rs.id NOT IN (SELECT repo_sync_id FROM mergestat.repo_sync_queue WHERE status = 'RUNNING' OR status = 'QUEUED');
+
+-- name: SetSyncNextRunAt :exec
+UPDATE mergestat.repo_syncs SET next_run_at = @NextRunAt WHERE id = @ID::uuid;
+
 -- name: FetchGitHubToken :one
 SELECT pgp_sym_decrypt(credentials, $1) FROM mergestat.service_auth_credentials WHERE type = 'GITHUB_PAT' ORDER BY created_at DESC LIMIT 1;
 
@@ -116,7 +159,17 @@ SELECT
 FROM mergestat.repo_syncs rs
 INNER JOIN mergestat.repo_sync_types AS rst ON rs.sync_type = rst.type
 WHERE schedule_enabled
+    -- cron-scheduled syncs are driven by the scheduler's cron path, not the continuous one
+    AND rs.schedule_cron IS NULL
     AND id NOT IN (SELECT repo_sync_id FROM mergestat.repo_sync_queue WHERE status = 'RUNNING' OR status = 'QUEUED')
+    -- Respect the per-sync minimum interval (cooldown): skip if the last completed run
+    -- is more recent than sync_interval_seconds ago. NULL interval = no minimum.
+    AND (
+        rs.sync_interval_seconds IS NULL
+        OR rs.last_completed_repo_sync_queue_id IS NULL
+        OR (SELECT lc.done_at FROM mergestat.repo_sync_queue lc WHERE lc.id = rs.last_completed_repo_sync_queue_id)
+            < now() - (rs.sync_interval_seconds * interval '1 second')
+    )
     AND NOT EXISTS (
         SELECT rq.done_at
         FROM ranked_queue rq
@@ -131,16 +184,33 @@ ORDER BY rs.priority, rs.sync_type desc
 UPDATE mergestat.repo_sync_queue SET last_keep_alive = now() WHERE id = $1;
 
 -- name: MarkSyncsAsTimedOut :many
-WITH timed_out_sync_jobs AS (
-    UPDATE mergestat.repo_sync_queue SET status = 'DONE' WHERE status = 'RUNNING' AND (
-        (last_keep_alive < now() - '10 minutes'::interval)
+-- A stale RUNNING job (no keep-alive within the window) is either retried with backoff
+-- or, once its retry budget is exhausted, marked terminally FAILED. FAILED jobs advance
+-- the repo_sync fairness anchor so a perpetually-stuck repo stops hogging the dequeue.
+WITH timed_out AS (
+    UPDATE mergestat.repo_sync_queue q SET
+        status = CASE WHEN q.retry_count < @MaxRetries::INT THEN 'QUEUED' ELSE 'FAILED' END,
+        retry_count = CASE WHEN q.retry_count < @MaxRetries::INT THEN q.retry_count + 1 ELSE q.retry_count END,
+        next_retry_at = CASE WHEN q.retry_count < @MaxRetries::INT
+            THEN now() + ((@BackoffSeconds::INT * power(2, LEAST(q.retry_count, 6)))::INT * interval '1 second')
+            ELSE q.next_retry_at END,
+        started_at = CASE WHEN q.retry_count < @MaxRetries::INT THEN NULL ELSE q.started_at END,
+        last_keep_alive = CASE WHEN q.retry_count < @MaxRetries::INT THEN NULL ELSE q.last_keep_alive END
+    WHERE q.status = 'RUNNING' AND (
+        (q.last_keep_alive < now() - '10 minutes'::interval)
         OR
-        (last_keep_alive IS NULL AND started_at < now() - '10 minutes'::interval)) -- if worker crashed before last_keep_alive was first set
-    RETURNING *
+        (q.last_keep_alive IS NULL AND q.started_at < now() - '10 minutes'::interval)) -- if worker crashed before last_keep_alive was first set
+    RETURNING q.id, q.repo_sync_id, q.status
+),
+advance_anchor AS (
+    UPDATE mergestat.repo_syncs rs SET last_completed_repo_sync_queue_id = t.id
+    FROM timed_out t WHERE rs.id = t.repo_sync_id AND t.status = 'FAILED'
+),
+logged AS (
+    INSERT INTO mergestat.repo_sync_logs (repo_sync_queue_id, log_type, message)
+    SELECT id, 'ERROR', 'No response from job within reasonable interval. Timing out.' FROM timed_out
 )
-INSERT INTO mergestat.repo_sync_logs (repo_sync_queue_id, log_type, message)
-SELECT id, 'ERROR', 'No response from job within reasonable interval. Timing out.' FROM timed_out_sync_jobs
-RETURNING repo_sync_queue_id
+SELECT id FROM timed_out
 ;
 
 -- name: DeleteRemovedRepos :exec 

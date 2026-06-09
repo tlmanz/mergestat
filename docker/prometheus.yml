@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  # Scrapes the MergeStat worker's metrics endpoint. The worker only serves /metrics
+  # when DEBUG is set (see the worker service env in docker-compose.yaml).
+  - job_name: mergestat-worker
+    static_configs:
+      - targets: ['worker:8080']

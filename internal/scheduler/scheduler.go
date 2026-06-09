@@ -2,14 +2,19 @@ package scheduler
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/mergestat/mergestat/internal/db"
+	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog"
 )
+
+// cronParser parses standard 5-field cron expressions (minute hour dom month dow).
+var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
 type scheduler struct {
 	logger *zerolog.Logger
@@ -33,6 +38,9 @@ func (s *scheduler) Start(ctx context.Context, interval time.Duration) {
 		} else {
 			s.logger.Info().Msg("re-scheduling all completed syncs to run again")
 		}
+
+		// enqueue any cron-scheduled syncs that are due, then advance their next_run_at
+		s.enqueueCronSyncs(ctx)
 
 		// TODO(patrickdevivo) this should probably be lifted up into a config/param
 		// of the scheduler, which is passed into New and defined by the caller
@@ -68,6 +76,42 @@ func (s *scheduler) Start(ctx context.Context, interval time.Duration) {
 			return
 		case <-time.After(interval):
 			exec()
+		}
+	}
+}
+
+// enqueueCronSyncs enqueues every cron-scheduled sync that is due, then advances its
+// next_run_at to the next occurrence of its cron expression. Cron-scheduled syncs are
+// excluded from EnqueueAllSyncs, so this is the only path that enqueues them.
+func (s *scheduler) enqueueCronSyncs(ctx context.Context) {
+	due, err := s.db.ListDueCronSyncs(ctx)
+	if err != nil {
+		s.logger.Err(err).Msg("could not list due cron syncs")
+		return
+	}
+
+	now := time.Now()
+	for _, sync := range due {
+		if !sync.ScheduleCron.Valid {
+			continue
+		}
+
+		schedule, err := cronParser.Parse(sync.ScheduleCron.String)
+		if err != nil {
+			s.logger.Warn().Err(err).Msgf("invalid cron expression %q for repo sync %s; skipping", sync.ScheduleCron.String, sync.ID)
+			continue
+		}
+
+		if err := s.db.EnqueueRepoSync(ctx, sync.ID); err != nil {
+			s.logger.Err(err).Msgf("could not enqueue cron sync %s", sync.ID)
+			continue
+		}
+
+		if err := s.db.SetSyncNextRunAt(ctx, db.SetSyncNextRunAtParams{
+			ID:        sync.ID,
+			NextRunAt: sql.NullTime{Time: schedule.Next(now), Valid: true},
+		}); err != nil {
+			s.logger.Err(err).Msgf("could not set next_run_at for cron sync %s", sync.ID)
 		}
 	}
 }

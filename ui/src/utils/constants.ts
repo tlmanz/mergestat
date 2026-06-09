@@ -100,6 +100,24 @@ export enum COOKIE {
   jwt = 'jwt'
 }
 
+// Common cron-schedule presets (standard 5-field, UTC) for the sync settings form.
+export const SYNC_CRON_PRESETS = [
+  { label: 'Hourly', value: '0 * * * *' },
+  { label: 'Nightly 2am', value: '0 2 * * *' },
+  { label: 'Weekly Mon 3am', value: '0 3 * * 1' },
+]
+
+// Minimum interval (cooldown) presets for scheduled syncs. value is in seconds; 0 means "no minimum".
+export const SYNC_INTERVAL_OPTIONS = [
+  { label: 'No minimum', value: 0 },
+  { label: 'Every 15 minutes', value: 900 },
+  { label: 'Every hour', value: 3600 },
+  { label: 'Every 6 hours', value: 21600 },
+  { label: 'Every 12 hours', value: 43200 },
+  { label: 'Every 24 hours', value: 86400 },
+  { label: 'Every 7 days', value: 604800 },
+]
+
 export const LINKS_TO = {
   createGithubPAT: 'https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token#creating-a-personal-access-token-classic',
   createGitlabPAT: 'https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html#create-a-personal-access-token',
