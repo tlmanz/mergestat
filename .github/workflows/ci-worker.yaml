@@ -3,7 +3,9 @@ on: [push, pull_request]
 jobs:
   build:
     name: CI Worker (Golang)
-    runs-on: ubuntu-latest
+    # Pinned to 22.04: newer GCC on ubuntu-latest (24.04) fails to compile
+    # sqlc's old pg_query_go/v2 CGo dep ("conflicting types for strchrnul").
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Set up Go 1.19
