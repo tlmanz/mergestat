@@ -2,20 +2,20 @@ BEGIN;
 
 -- Audit trail of user/role management actions: who changed whose role/account and when.
 CREATE TABLE IF NOT EXISTS mergestat.user_mgmt_audit_log (
-    id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    actor      TEXT NOT NULL,
-    action     TEXT NOT NULL,
-    target     TEXT NOT NULL,
-    detail     TEXT,
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target TEXT NOT NULL,
+    detail TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 COMMENT ON TABLE mergestat.user_mgmt_audit_log IS
-    'Audit trail of user/role management actions (DB users and OAuth role overrides). Append-only: admins can read and insert but not modify/delete.';
+'Audit trail of user/role management actions (DB users and OAuth role overrides). Append-only: admins can read and insert but not modify/delete.';
 
 -- Single helper all instrumented paths write through. Records the acting DB role.
 CREATE OR REPLACE FUNCTION mergestat.audit_role_change(_action TEXT, _target TEXT, _detail TEXT)
-RETURNS void AS
+RETURNS VOID AS
 $BODY$
     INSERT INTO mergestat.user_mgmt_audit_log (actor, action, target, detail)
     VALUES (current_user, _action, _target, _detail);
@@ -24,7 +24,7 @@ LANGUAGE sql VOLATILE;
 
 -- OAuth role overrides live in a table, so a trigger captures every change with no
 -- need to rewrite the oauth_user_mgmt_* functions.
-CREATE OR REPLACE FUNCTION mergestat.user_oauth_roles_audit() RETURNS trigger AS
+CREATE OR REPLACE FUNCTION mergestat.user_oauth_roles_audit() RETURNS TRIGGER AS
 $BODY$
 BEGIN
     IF (TG_OP = 'DELETE') THEN
@@ -42,8 +42,8 @@ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS user_oauth_roles_audit_trigger ON mergestat.user_oauth_roles;
 CREATE TRIGGER user_oauth_roles_audit_trigger
-    AFTER INSERT OR UPDATE OR DELETE ON mergestat.user_oauth_roles
-    FOR EACH ROW EXECUTE FUNCTION mergestat.user_oauth_roles_audit();
+AFTER INSERT OR UPDATE OR DELETE ON mergestat.user_oauth_roles
+FOR EACH ROW EXECUTE FUNCTION mergestat.user_oauth_roles_audit();
 
 -- DB-user role/account changes happen inside SECURITY-less plpgsql functions (CREATE USER /
 -- GRANT are not table ops, so they can't be trapped by a trigger). Re-declare the three

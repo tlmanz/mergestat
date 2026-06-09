@@ -3,7 +3,7 @@ BEGIN;
 DROP FUNCTION IF EXISTS mergestat.fail_or_retry_sync_job(BIGINT, INT, INT);
 
 -- Restore the original status trigger (without the FAILED branch).
-CREATE OR REPLACE FUNCTION public.repo_sync_queue_status_update_trigger() RETURNS trigger
+CREATE OR REPLACE FUNCTION public.repo_sync_queue_status_update_trigger() RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
@@ -17,8 +17,8 @@ END;
 $$;
 
 ALTER TABLE mergestat.repo_sync_queue
-    DROP COLUMN IF EXISTS next_retry_at,
-    DROP COLUMN IF EXISTS retry_count;
+DROP COLUMN IF EXISTS next_retry_at,
+DROP COLUMN IF EXISTS retry_count;
 
 DELETE FROM mergestat.repo_sync_queue_status_types WHERE type = 'FAILED';
 

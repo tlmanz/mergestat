@@ -9,14 +9,14 @@ BEGIN;
 -- (OAUTH_DEFAULT_ROLE in the UI, READ_ONLY if unset); this table lets an admin
 -- override the role for specific users ("hybrid" mapping).
 CREATE TABLE IF NOT EXISTS mergestat.user_oauth_roles (
-    email      TEXT PRIMARY KEY,
-    role       TEXT NOT NULL CHECK (role IN ('ADMIN', 'USER', 'QUERIES_ONLY', 'READ_ONLY', 'DEMO')),
+    email TEXT PRIMARY KEY,
+    role TEXT NOT NULL CHECK (role IN ('ADMIN', 'USER', 'QUERIES_ONLY', 'READ_ONLY', 'DEMO')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 COMMENT ON TABLE mergestat.user_oauth_roles IS
-    'Per-user MergeStat role overrides for OAuth (SSO) logins, keyed by (lower-cased) email. Maps an authenticated OAuth identity to a MergeStat role; the UI translates the role key to a mergestat_role_* PostgreSQL group role for the request.';
+'Per-user MergeStat role overrides for OAuth (SSO) logins, keyed by (lower-cased) email. Maps an authenticated OAuth identity to a MergeStat role; the UI translates the role key to a mergestat_role_* PostgreSQL group role for the request.';
 
 -- Upsert an override. Emails are normalised to lower case to match the UI lookup.
 CREATE OR REPLACE FUNCTION mergestat.oauth_user_mgmt_set_role(email TEXT, role TEXT)

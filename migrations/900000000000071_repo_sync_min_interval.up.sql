@@ -9,6 +9,6 @@ ALTER TABLE mergestat.repo_syncs
 ADD COLUMN IF NOT EXISTS sync_interval_seconds INTEGER;
 
 COMMENT ON COLUMN mergestat.repo_syncs.sync_interval_seconds IS
-    'Minimum seconds between scheduled runs of this sync (cooldown). NULL means no minimum. Manual "Sync Now" is not affected.';
+'Minimum seconds between scheduled runs of this sync (cooldown). NULL means no minimum. Manual "Sync Now" is not affected.';
 
 COMMIT;

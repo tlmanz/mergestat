@@ -8,11 +8,11 @@ ON CONFLICT DO NOTHING;
 
 -- Retry bookkeeping per queued run.
 ALTER TABLE mergestat.repo_sync_queue
-    ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
 
 -- Teach the status trigger to stamp done_at when a job reaches the terminal FAILED state.
-CREATE OR REPLACE FUNCTION public.repo_sync_queue_status_update_trigger() RETURNS trigger
+CREATE OR REPLACE FUNCTION public.repo_sync_queue_status_update_trigger() RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
